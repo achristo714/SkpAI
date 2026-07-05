@@ -50,6 +50,7 @@ const state = {
   renderData: null, // data URI of render (for local save)
   video: null,      // hosted URL of seedance result
   motion: 'dolly',
+  scenes: [],       // [{index, name}] from the model
   busy: false,
 };
 
@@ -68,8 +69,19 @@ const el = {
   motionSeg: $('motionSeg'),
   videoBtn: $('videoBtn'), videoPreview: $('videoPreview'), videoEl: $('videoEl'),
   saveVideo: $('saveVideo'),
+  scanBtn: $('scanBtn'), sceneCount: $('sceneCount'), batchProgress: $('batchProgress'),
+  batchBtn: $('batchBtn'), gallery: $('gallery'),
   clearLog: $('clearLog'),
 };
+
+/* Ruby callbacks that JS needs to await are turned into promises here:
+   a caller stores a resolver under a key, the SkpAI.* bridge resolves it. */
+const waiters = {};
+function rubyAwait(key) { return new Promise((res) => { waiters[key] = res; }); }
+function rubyResolve(key, val) {
+  const r = waiters[key];
+  if (r) { delete waiters[key]; r(val); }
+}
 
 /* ------------------------------------------------------------------ util */
 function log(msg, cls) {
@@ -94,7 +106,7 @@ function setStatus(text, mode) {
 function setBusy(on, text) {
   state.busy = on;
   setStatus(text || (on ? 'working' : 'idle'), on ? 'busy' : 'idle');
-  [el.captureBtn, el.renderBtn, el.videoBtn, el.enhanceBtn].forEach((b) => {
+  [el.captureBtn, el.renderBtn, el.videoBtn, el.enhanceBtn, el.scanBtn, el.batchBtn].forEach((b) => {
     if (!b) return;
     if (on) b.dataset.wasDisabled = b.disabled ? '1' : '0';
     b.disabled = on ? true : (b.dataset.wasDisabled === '1');
@@ -132,6 +144,17 @@ window.SkpAI = {
       log('api key restored from SketchUp defaults', 'l-time');
     }
   },
+  onScenes(scenes) {
+    state.scenes = scenes || [];
+    const n = state.scenes.length;
+    el.sceneCount.textContent = n ? `${n} scene${n > 1 ? 's' : ''}` : 'no scenes';
+    if (!n) log('no scenes in model — create scenes in SketchUp first', 'l-warn');
+    else log(`found ${n} scene${n > 1 ? 's' : ''}`, 'l-ok');
+    rubyResolve('scenes', state.scenes);
+    refreshButtons();
+  },
+  onBatchReady() { rubyResolve('batch'); },
+  onSceneCapture(index, name, dataUri) { rubyResolve('scene', { index, name, dataUri }); },
 };
 
 /* ------------------------------------------------------------------ fal.ai queue runner */
@@ -312,6 +335,124 @@ async function doVideo() {
   }
 }
 
+/* ------------------------------------------------------------------ batch: all scenes */
+function scanScenes() {
+  if (!callRuby('list_scenes')) {
+    log('SketchUp bridge unavailable (open inside SketchUp)', 'l-err');
+    return;
+  }
+  log('scanning scenes…', 'l-acc');
+}
+
+async function batchRender() {
+  if (!state.scenes.length) { log('scan for scenes first', 'l-warn'); return; }
+  if (!el.prompt.value.trim()) { log('enter a prompt (02)', 'l-warn'); return; }
+  if (!state.apiKey) { log('set your fal.ai key (00)', 'l-warn'); return; }
+
+  // enhance once up front so every scene shares the strong prompt
+  if (isWeak()) {
+    log('weak prompt — enhancing once before the batch', 'l-warn');
+    const enhanced = await enhancePrompt();
+    if (!enhanced) return;
+  }
+
+  setBusy(true, 'batch render');
+  el.gallery.hidden = false;
+  el.gallery.innerHTML = '';
+  const total = state.scenes.length;
+  const refNote = state.reference
+    ? ' Match the materials, palette and mood of the reference image while keeping the exact geometry and composition of the first image.'
+    : ' Keep the exact geometry and composition of the input image.';
+  const basePrompt = el.prompt.value.trim() + refNote;
+
+  try {
+    await new Promise((res) => { callRuby('batch_begin'); rubyAwait('batch').then(res); });
+
+    for (let i = 0; i < total; i++) {
+      el.batchProgress.textContent = `${i + 1}/${total}`;
+      setStatus(`scene ${i + 1}/${total}`, 'busy');
+
+      // capture this scene from SketchUp
+      callRuby('capture_scene', state.scenes[i].index);
+      const cap = await rubyAwait('scene');
+      const cell = addCell(cap.name || `Scene ${i + 1}`);
+      if (!cap.dataUri) { failCell(cell, 'capture failed'); log(`· ${cap.name}: capture failed`, 'l-warn'); continue; }
+
+      // render it
+      try {
+        const images = state.reference ? [cap.dataUri, state.reference] : [cap.dataUri];
+        const out = await falRun(FAL.RENDER, { prompt: basePrompt, image_urls: images, num_images: 1 });
+        const url = pickImage(out);
+        if (!url) throw new Error('no image');
+        fillCell(cell, url, cap.name);
+        log(`· ${cap.name} ✓`, 'l-ok');
+      } catch (e) {
+        failCell(cell, 'render failed');
+        log(`· ${cap.name}: ${e.message}`, 'l-err');
+      }
+    }
+
+    callRuby('batch_end');
+    log(`batch complete · ${total} scene${total > 1 ? 's' : ''}`, 'l-ok');
+    setStatus('done', 'ok');
+  } catch (e) {
+    callRuby('batch_end');
+    log('batch failed: ' + e.message, 'l-err');
+    setStatus('error', 'err');
+  } finally {
+    el.batchProgress.textContent = '';
+    setBusy(false);
+    refreshButtons();
+  }
+}
+
+function addCell(name) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.innerHTML =
+    `<div class="cell-thumb"><span class="cell-spin">rendering…</span></div>` +
+    `<div class="cell-bar"><span class="cell-name">${escapeHtml(name)}</span>` +
+    `<span class="cell-acts"></span></div>`;
+  el.gallery.appendChild(cell);
+  return cell;
+}
+function fillCell(cell, url, name) {
+  const thumb = cell.querySelector('.cell-thumb');
+  thumb.innerHTML = `<img alt="${escapeHtml(name)}" src="${url}">`;
+  const acts = cell.querySelector('.cell-acts');
+  // → send to module 05 as the current render for video
+  const toVideo = iconBtn('→', 'use for video');
+  toVideo.onclick = () => useAsRender(url, name);
+  // save png
+  const save = iconBtn('↓', 'save png');
+  save.onclick = async () => {
+    const data = await urlToDataUri(url).catch(() => null);
+    if (data) callRuby('save_data_url', `skpai_${slug(name)}.png`, data);
+    else callRuby('open_url', url);
+  };
+  acts.append(toVideo, save);
+}
+function failCell(cell, msg) {
+  cell.classList.add('err');
+  cell.querySelector('.cell-thumb').innerHTML = `<span class="cell-spin">${escapeHtml(msg)}</span>`;
+}
+function iconBtn(label, title) {
+  const b = document.createElement('button');
+  b.className = 'icon-btn'; b.textContent = label; b.title = title;
+  return b;
+}
+function useAsRender(url, name) {
+  state.render = url;
+  state.renderData = null;
+  el.renderImg.src = url; el.renderImg.hidden = false;
+  el.renderPreview.querySelector('.preview-empty').style.display = 'none';
+  urlToDataUri(url).then((d) => { state.renderData = d; }).catch(() => {});
+  log(`“${name}” → ready for video (05)`, 'l-acc');
+  refreshButtons();
+  el.videoBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'scene'; }
+
 /* ------------------------------------------------------------------ response pickers */
 function pickImage(o) {
   if (!o) return null;
@@ -345,6 +486,8 @@ function refreshButtons() {
   el.captureBtn.disabled = false;
   el.renderBtn.disabled = false;
   el.enhanceBtn.disabled = false;
+  el.scanBtn.disabled = false;
+  el.batchBtn.disabled = !state.scenes.length;
 }
 
 /* ------------------------------------------------------------------ reference image */
@@ -413,6 +556,10 @@ function wire() {
   // --- render / video ---
   el.renderBtn.addEventListener('click', doRender);
   el.videoBtn.addEventListener('click', doVideo);
+
+  // --- batch scenes ---
+  el.scanBtn.addEventListener('click', scanScenes);
+  el.batchBtn.addEventListener('click', batchRender);
 
   // --- motion segmented ---
   el.motionSeg.querySelectorAll('.seg').forEach((seg) => {

@@ -155,6 +155,28 @@
       </div>
     </section>
 
+    <!-- ============ 06 · BATCH ============ -->
+    <section class="module" id="mod-batch">
+      <div class="mod-head">
+        <span class="mod-num">06</span>
+        <span class="mod-label">batch · scenes</span>
+        <span class="mod-rule"></span>
+        <button class="chip" id="scanBtn" type="button">scan</button>
+      </div>
+      <div class="mod-body">
+        <div class="batch-status">
+          <span id="sceneCount" class="mono batch-count">— scenes</span>
+          <span id="batchProgress" class="mono batch-prog"></span>
+        </div>
+        <button class="btn btn--primary btn--wide" id="batchBtn" type="button" disabled>
+          <span class="btn-icon">▤</span> render all scenes
+        </button>
+        <div class="gallery" id="gallery" hidden></div>
+        <p class="hint">Renders every SketchUp scene with the current prompt &amp; reference.
+          Use <b>→</b> on a result to send it to <b>05</b> for video.</p>
+      </div>
+    </section>
+
     <!-- ============ CONSOLE ============ -->
     <section class="console" id="console">
       <div class="console-head">

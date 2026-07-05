@@ -263,6 +263,55 @@ body {
 .seg--on { color: var(--ink); background: var(--panel-2); }
 .seg--on .seg-dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
 
+/* ---------------- batch / gallery ---------------- */
+.batch-status {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.batch-count { font-size: 11px; color: var(--ink-dim); letter-spacing: 0.08em; }
+.batch-prog { font-size: 10px; color: var(--accent); letter-spacing: 0.1em; }
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.cell {
+  position: relative;
+  background: var(--recess);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.cell-thumb {
+  position: relative; width: 100%; aspect-ratio: 16 / 10;
+  background: linear-gradient(var(--recess), #0a0a0b);
+  display: flex; align-items: center; justify-content: center;
+}
+.cell-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cell-spin {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.cell.err .cell-thumb { background: #1a0d0d; }
+.cell-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 7px; gap: 6px; border-top: 1px solid var(--line-soft);
+}
+.cell-name {
+  font-family: var(--mono); font-size: 9.5px; color: var(--ink-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cell-acts { display: flex; gap: 4px; flex-shrink: 0; }
+.icon-btn {
+  font-family: var(--mono); font-size: 10px; line-height: 1;
+  color: var(--ink-dim); background: transparent;
+  border: 1px solid var(--line); border-radius: 3px;
+  width: 20px; height: 20px; cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color .15s, border-color .15s;
+}
+.icon-btn:hover { color: var(--accent); border-color: var(--accent-dim); }
+
 /* ---------------- console ---------------- */
 .console {
   background: var(--recess);

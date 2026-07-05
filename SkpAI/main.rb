@@ -79,6 +79,35 @@ module SkpAI
         val = Sketchup.read_default('SkpAI', key.to_s, '')
         push(dialog, "SkpAI.onPref(#{key.to_json}, #{val.to_json})")
       end
+
+      # --- batch: render every scene (SketchUp "page") ------------------
+      # JS -> Ruby: report the model's scenes so JS can drive the batch.
+      dialog.add_action_callback('list_scenes') do |_ctx|
+        scenes = scene_list
+        push(dialog, "SkpAI.onScenes(#{scenes.to_json})")
+      end
+
+      # JS -> Ruby: snapshot view state and turn scene transitions off so
+      # each scene can be applied and captured instantly.
+      dialog.add_action_callback('batch_begin') do |_ctx|
+        batch_begin
+        push(dialog, 'SkpAI.onBatchReady()')
+      end
+
+      # JS -> Ruby: apply scene <index>, capture it, hand back the image.
+      dialog.add_action_callback('capture_scene') do |_ctx, index|
+        name, data_uri = capture_scene(index.to_i)
+        if data_uri
+          push(dialog, "SkpAI.onSceneCapture(#{index.to_i}, #{name.to_json}, #{data_uri.to_json})")
+        else
+          push(dialog, "SkpAI.onSceneCapture(#{index.to_i}, #{name.to_json}, null)")
+        end
+      end
+
+      # JS -> Ruby: restore the view state saved in batch_begin.
+      dialog.add_action_callback('batch_end') do |_ctx|
+        batch_end
+      end
     end
 
     # Renders the active view to a temp PNG, scaled to CAPTURE_LONG_EDGE on
@@ -87,7 +116,12 @@ module SkpAI
       model = Sketchup.active_model
       return nil unless model
 
-      view = model.active_view
+      render_view_to_data_uri(model.active_view)
+    end
+
+    # Shared capture: write the given view to a temp PNG scaled to
+    # CAPTURE_LONG_EDGE on its long edge, return a data: URI (or nil).
+    def render_view_to_data_uri(view)
       return nil unless view
 
       vw = view.vpwidth.to_f
@@ -99,7 +133,7 @@ module SkpAI
       w = (vw * scale).round
       h = (vh * scale).round
 
-      tmp = File.join(temp_dir, "skpai_capture_#{Time.now.to_i}.png")
+      tmp = File.join(temp_dir, "skpai_capture_#{Time.now.to_i}_#{rand(9999)}.png")
       ok = view.write_image(
         filename:    tmp,
         width:       w,
@@ -115,6 +149,72 @@ module SkpAI
     rescue StandardError => e
       warn("SkpAI capture error: #{e.message}")
       nil
+    end
+
+    # --- scenes / batch -------------------------------------------------
+
+    # [{index:, name:}, ...] for every scene (page) in the active model.
+    def scene_list
+      model = Sketchup.active_model
+      return [] unless model
+
+      model.pages.to_a.each_with_index.map do |page, i|
+        { index: i, name: (page.name && !page.name.empty? ? page.name : "Scene #{i + 1}") }
+      end
+    rescue StandardError
+      []
+    end
+
+    # Save view state and disable scene transitions so each page can be
+    # applied and captured instantly (no mid-animation frames).
+    def batch_begin
+      model = Sketchup.active_model
+      return unless model
+
+      opts = model.options['PageOptions']
+      @batch_state = {
+        page:       model.pages.selected_page,
+        show_trans: (opts ? opts['ShowTransition'] : nil),
+        trans_time: (opts ? opts['TransitionTime'] : nil),
+      }
+      if opts
+        opts['ShowTransition'] = false
+        opts['TransitionTime'] = 0.0
+      end
+    rescue StandardError => e
+      warn("SkpAI batch_begin: #{e.message}")
+    end
+
+    # Apply scene <index>, capture it. Returns [name, data_uri|nil].
+    def capture_scene(index)
+      model = Sketchup.active_model
+      return [nil, nil] unless model
+
+      page = model.pages[index]
+      return ["Scene #{index + 1}", nil] unless page
+
+      model.pages.selected_page = page
+      name = page.name && !page.name.empty? ? page.name : "Scene #{index + 1}"
+      [name, render_view_to_data_uri(model.active_view)]
+    rescue StandardError => e
+      warn("SkpAI capture_scene: #{e.message}")
+      ["Scene #{index + 1}", nil]
+    end
+
+    # Restore the view state captured in batch_begin.
+    def batch_end
+      model = Sketchup.active_model
+      return unless model && @batch_state
+
+      opts = model.options['PageOptions']
+      if opts
+        opts['ShowTransition'] = @batch_state[:show_trans] unless @batch_state[:show_trans].nil?
+        opts['TransitionTime'] = @batch_state[:trans_time] unless @batch_state[:trans_time].nil?
+      end
+      model.pages.selected_page = @batch_state[:page] if @batch_state[:page]
+      @batch_state = nil
+    rescue StandardError => e
+      warn("SkpAI batch_end: #{e.message}")
     end
 
     # Writes a data: URI (data:<mime>;base64,<payload>) to a user-chosen file.

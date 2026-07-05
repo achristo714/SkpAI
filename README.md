@@ -20,10 +20,16 @@ enhancer. Dark, Teenage-Engineering "field" styled panel.
 | 03 | **aesthetic ref** | Drop a material / mood image. Passed to nano-banana-2 as a second image so output materials match. |
 | 04 | **render · nb2** | Sends viewport (+ reference) to `nano-banana-2` and shows the result. Auto-enhances a weak prompt first. |
 | 05 | **video · seedance 2** | Uses the render as the first frame → *dolly in* or *timelapse* clip via `seedance/v2`. |
+| 06 | **batch · scenes** | **Scan** the model's scenes, then **render all** with the current prompt & reference. Each result gets a *save* (↓) and a *→* to load it into **05** for video. |
 
 The Ruby side is intentionally thin — it only owns the menu, the dialog, the
 viewport capture, and saving files. All fal.ai traffic runs from JavaScript
 inside the dialog's embedded Chromium.
+
+**Batch** walks `model.pages` (SketchUp scenes). Ruby disables scene transitions,
+applies each page, captures it, and restores your original scene + transition
+settings when done — so kicking off a batch doesn't leave your model on a
+different scene.
 
 ---
 
