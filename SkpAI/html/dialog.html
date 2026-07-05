@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SkpAI</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="device">
+
+    <!-- ============ HEADER ============ -->
+    <header class="masthead">
+      <div class="brand">
+        <span class="brand-mark">◑</span>
+        <span class="brand-name">SkpAI</span>
+        <span class="brand-sub">field render</span>
+      </div>
+      <div class="status">
+        <span id="led" class="led led--idle"></span>
+        <span id="statusText" class="status-text">idle</span>
+      </div>
+    </header>
+
+    <!-- ============ 00 · CONNECT ============ -->
+    <section class="module" id="mod-key">
+      <div class="mod-head">
+        <span class="mod-num">00</span>
+        <span class="mod-label">connect</span>
+        <span class="mod-rule"></span>
+        <button class="chip" id="keyToggle" type="button">show</button>
+      </div>
+      <div class="mod-body">
+        <label class="field-label" for="apiKey">fal.ai api key</label>
+        <div class="row">
+          <input id="apiKey" class="text-input mono" type="password"
+                 placeholder="fal_key_..." autocomplete="off" spellcheck="false" />
+          <button class="btn btn--ghost" id="saveKey" type="button">save</button>
+        </div>
+        <p class="hint">Stored locally on this machine. Get a key at fal.ai/dashboard/keys</p>
+      </div>
+    </section>
+
+    <!-- ============ 01 · CAPTURE ============ -->
+    <section class="module" id="mod-capture">
+      <div class="mod-head">
+        <span class="mod-num">01</span>
+        <span class="mod-label">capture</span>
+        <span class="mod-rule"></span>
+      </div>
+      <div class="mod-body">
+        <div class="preview preview--source" id="sourcePreview">
+          <span class="preview-empty">no viewport captured</span>
+          <img id="sourceImg" alt="viewport" hidden />
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+        </div>
+        <button class="btn btn--wide" id="captureBtn" type="button">
+          <span class="btn-icon">⊡</span> capture viewport
+        </button>
+      </div>
+    </section>
+
+    <!-- ============ 02 · PROMPT ============ -->
+    <section class="module" id="mod-prompt">
+      <div class="mod-head">
+        <span class="mod-num">02</span>
+        <span class="mod-label">prompt</span>
+        <span class="mod-rule"></span>
+        <button class="chip chip--accent" id="enhanceBtn" type="button">✧ enhance</button>
+      </div>
+      <div class="mod-body">
+        <textarea id="prompt" class="text-area mono" rows="3"
+                  placeholder="e.g. modern concrete house at dusk"></textarea>
+        <div class="meter-row">
+          <span class="meter-label">prompt strength</span>
+          <span class="meter"><span id="promptMeter" class="meter-fill"></span></span>
+          <span id="promptWords" class="meter-val mono">0w</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 03 · REFERENCE ============ -->
+    <section class="module" id="mod-ref">
+      <div class="mod-head">
+        <span class="mod-num">03</span>
+        <span class="mod-label">aesthetic ref</span>
+        <span class="mod-rule"></span>
+        <button class="chip" id="clearRef" type="button" hidden>clear</button>
+      </div>
+      <div class="mod-body">
+        <label class="dropzone" id="dropzone" for="refInput">
+          <span class="preview-empty" id="refEmpty">drop material / mood image</span>
+          <img id="refImg" alt="reference" hidden />
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+        </label>
+        <input id="refInput" type="file" accept="image/*" hidden />
+        <p class="hint">nano-banana-2 matches materials & mood to this image.</p>
+      </div>
+    </section>
+
+    <!-- ============ 04 · RENDER ============ -->
+    <section class="module" id="mod-render">
+      <div class="mod-head">
+        <span class="mod-num">04</span>
+        <span class="mod-label">render · nb2</span>
+        <span class="mod-rule"></span>
+      </div>
+      <div class="mod-body">
+        <div class="preview preview--result" id="renderPreview">
+          <span class="preview-empty">no render yet</span>
+          <img id="renderImg" alt="render" hidden />
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+        </div>
+        <div class="row">
+          <button class="btn btn--primary btn--wide" id="renderBtn" type="button">
+            <span class="btn-icon">▶</span> render
+          </button>
+          <button class="btn btn--ghost" id="saveRender" type="button" disabled>save</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 05 · VIDEO ============ -->
+    <section class="module" id="mod-video">
+      <div class="mod-head">
+        <span class="mod-num">05</span>
+        <span class="mod-label">video · seedance 2</span>
+        <span class="mod-rule"></span>
+      </div>
+      <div class="mod-body">
+        <div class="segmented" id="motionSeg" role="tablist">
+          <button class="seg seg--on" data-motion="dolly" type="button">
+            <span class="seg-dot"></span> dolly in
+          </button>
+          <button class="seg" data-motion="timelapse" type="button">
+            <span class="seg-dot"></span> timelapse
+          </button>
+        </div>
+        <div class="preview preview--video" id="videoPreview">
+          <span class="preview-empty">no video yet</span>
+          <video id="videoEl" playsinline loop muted hidden></video>
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+        </div>
+        <div class="row">
+          <button class="btn btn--primary btn--wide" id="videoBtn" type="button" disabled>
+            <span class="btn-icon">▶</span> animate
+          </button>
+          <button class="btn btn--ghost" id="saveVideo" type="button" disabled>open</button>
+        </div>
+        <p class="hint">Animate uses the latest render as the first frame.</p>
+      </div>
+    </section>
+
+    <!-- ============ CONSOLE ============ -->
+    <section class="console" id="console">
+      <div class="console-head">
+        <span class="console-title">console</span>
+        <button class="chip" id="clearLog" type="button">clear</button>
+      </div>
+      <pre id="log" class="log mono"></pre>
+    </section>
+
+    <footer class="footer">
+      <span class="mono">SkpAI 0.1.0</span>
+      <span class="mono">nano-banana-2 · seedance 2</span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
