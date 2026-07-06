@@ -21,6 +21,7 @@ enhancer. Dark, Teenage-Engineering "field" styled panel.
 | 04 | **render · nb2** | Sends viewport (+ reference) to `nano-banana-2` and shows the result. Auto-enhances a weak prompt first. |
 | 05 | **video · seedance 2** | Uses the render as the first frame → *dolly in* or *timelapse* clip via `seedance/v2`. |
 | 06 | **batch · scenes** | **Scan** the model's scenes, then **render all** with the current prompt & reference. Each result gets a *save* (↓) and a *→* to load it into **05** for video. |
+| 07 | **history** | Every render is saved to disk and restored when you reopen SkpAI, so closing the panel never loses work. Each entry has *→* (load back into **04** for re-use / video), *↓* (export PNG), and *×* (delete). |
 
 The Ruby side is intentionally thin — it only owns the menu, the dialog, the
 viewport capture, and saving files. All fal.ai traffic runs from JavaScript
@@ -86,6 +87,10 @@ just below — tweak the wording or add your own moves there.
   renders fast and cheap. Adjust `CAPTURE_LONG_EDGE` in `SkpAI/main.rb`.
 - If the dialog can't reach fal (CORS / offline), errors surface in the in-panel
   **console** at the bottom.
+- **History** persists to `~/.skpai/` — `index.json` (metadata + small thumbnails)
+  and `media/<id>.png` (full-res renders). Capped at 80 entries; oldest are
+  pruned. Delete that folder to reset. Full-res bytes are stored locally so
+  history survives even after fal's hosted result URLs expire.
 
 ---
 

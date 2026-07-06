@@ -108,6 +108,42 @@ module SkpAI
       dialog.add_action_callback('batch_end') do |_ctx|
         batch_end
       end
+
+      # --- export history (persists across close / reopen / restart) ----
+      # JS -> Ruby: hand back the whole saved history index.
+      dialog.add_action_callback('history_load') do |_ctx|
+        push(dialog, "SkpAI.onHistory(#{history_index.to_json})")
+      end
+
+      # JS -> Ruby: persist an entry (+ full-res PNG data URI) to disk.
+      dialog.add_action_callback('history_add') do |_ctx, meta_json, data_url|
+        entry = history_add(meta_json, data_url)
+        push(dialog, "SkpAI.onHistoryAdded(#{entry.to_json})") if entry
+      end
+
+      # JS -> Ruby: read one entry's full-res PNG back as a data URI.
+      dialog.add_action_callback('history_get_full') do |_ctx, id|
+        d = history_full(id)
+        push(dialog, "SkpAI.onHistoryFull(#{id.to_json}, #{(d || '').to_json})")
+      end
+
+      # JS -> Ruby: delete one entry (index + media), return refreshed index.
+      dialog.add_action_callback('history_delete') do |_ctx, id|
+        history_delete(id)
+        push(dialog, "SkpAI.onHistory(#{history_index.to_json})")
+      end
+
+      # JS -> Ruby: wipe the whole history.
+      dialog.add_action_callback('history_clear') do |_ctx|
+        history_clear
+        push(dialog, "SkpAI.onHistory(#{history_index.to_json})")
+      end
+
+      # JS -> Ruby: export one stored render to a user-chosen file.
+      dialog.add_action_callback('history_export') do |_ctx, id|
+        path = history_export(id)
+        push(dialog, "SkpAI.onSaved(#{(path || '').to_json})") if path
+      end
     end
 
     # Renders the active view to a temp PNG, scaled to CAPTURE_LONG_EDGE on
@@ -215,6 +251,118 @@ module SkpAI
       @batch_state = nil
     rescue StandardError => e
       warn("SkpAI batch_end: #{e.message}")
+    end
+
+    # --- export history -------------------------------------------------
+    # Persisted under ~/.skpai so renders survive closing/reopening the
+    # extension and restarting SketchUp. index.json holds lightweight
+    # entries (prompt, aesthetic, scene, timestamp, small thumb); the
+    # full-res PNGs live in ~/.skpai/media/<id>.png.
+    HISTORY_ROOT = File.join(Dir.home, '.skpai')
+    HISTORY_MAX  = 80
+
+    def history_dir
+      FileUtils.mkdir_p(HISTORY_ROOT)
+      HISTORY_ROOT
+    end
+
+    def history_media_dir
+      d = File.join(HISTORY_ROOT, 'media')
+      FileUtils.mkdir_p(d)
+      d
+    end
+
+    def history_index_path
+      File.join(history_dir, 'index.json')
+    end
+
+    def history_index
+      return [] unless File.exist?(history_index_path)
+      data = JSON.parse(File.read(history_index_path))
+      data.is_a?(Array) ? data : []
+    rescue StandardError
+      []
+    end
+
+    def history_write(arr)
+      File.write(history_index_path, JSON.pretty_generate(arr))
+    rescue StandardError => e
+      warn("SkpAI history_write: #{e.message}")
+    end
+
+    def sanitize_id(id)
+      id.to_s.gsub(/[^a-zA-Z0-9_\-]/, '_')[0, 64]
+    end
+
+    def history_media_path(id)
+      File.join(history_media_dir, "#{sanitize_id(id)}.png")
+    end
+
+    def history_add(meta_json, data_url)
+      entry = JSON.parse(meta_json)
+      return nil unless entry.is_a?(Hash) && entry['id']
+
+      if data_url && data_url.start_with?('data:')
+        _, payload = data_url.split(',', 2)
+        File.binwrite(history_media_path(entry['id']), Base64.decode64(payload)) if payload
+      end
+
+      arr = history_index
+      arr.unshift(entry)
+      if arr.length > HISTORY_MAX
+        arr[HISTORY_MAX..-1].each { |e| delete_media(e['id']) }
+        arr = arr[0, HISTORY_MAX]
+      end
+      history_write(arr)
+      entry
+    rescue StandardError => e
+      warn("SkpAI history_add: #{e.message}")
+      nil
+    end
+
+    # Full-res PNG for an entry as a data: URI (nil if missing).
+    def history_full(id)
+      path = history_media_path(id)
+      return nil unless File.exist?(path)
+      "data:image/png;base64,#{Base64.strict_encode64(File.binread(path))}"
+    rescue StandardError
+      nil
+    end
+
+    def delete_media(id)
+      path = history_media_path(id)
+      File.delete(path) if File.exist?(path)
+    rescue StandardError
+      nil
+    end
+
+    def history_delete(id)
+      history_write(history_index.reject { |e| e['id'] == id })
+      delete_media(id)
+    rescue StandardError => e
+      warn("SkpAI history_delete: #{e.message}")
+    end
+
+    def history_clear
+      history_index.each { |e| delete_media(e['id']) }
+      history_write([])
+    rescue StandardError => e
+      warn("SkpAI history_clear: #{e.message}")
+    end
+
+    def history_export(id)
+      src = history_media_path(id)
+      return nil unless File.exist?(src)
+
+      dir  = Sketchup.active_model && !Sketchup.active_model.path.to_s.empty? ? File.dirname(Sketchup.active_model.path) : history_dir
+      dest = UI.savepanel('Export render', dir, "skpai_#{sanitize_id(id)}.png")
+      return nil unless dest
+
+      FileUtils.cp(src, dest)
+      dest
+    rescue StandardError => e
+      UI.messagebox("SkpAI export failed: #{e.message}")
+      nil
     end
 
     # Writes a data: URI (data:<mime>;base64,<payload>) to a user-chosen file.

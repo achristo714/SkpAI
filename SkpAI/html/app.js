@@ -70,6 +70,7 @@ const state = {
   video: null,      // hosted URL of seedance result
   motion: 'dolly',
   scenes: [],       // [{index, name}] from the model
+  history: [],      // persisted render history (mirrors ~/.skpai/index.json)
   busy: false,
 };
 
@@ -90,6 +91,8 @@ const el = {
   saveVideo: $('saveVideo'),
   scanBtn: $('scanBtn'), sceneCount: $('sceneCount'), batchProgress: $('batchProgress'),
   batchBtn: $('batchBtn'), gallery: $('gallery'),
+  history: $('history'), historyCount: $('historyCount'), historyEmpty: $('historyEmpty'),
+  clearHistory: $('clearHistory'),
   clearLog: $('clearLog'),
 };
 
@@ -174,6 +177,9 @@ window.SkpAI = {
   },
   onBatchReady() { rubyResolve('batch'); },
   onSceneCapture(index, name, dataUri) { rubyResolve('scene', { index, name, dataUri }); },
+  onHistory(entries) { renderHistory(entries || []); },
+  onHistoryAdded(entry) { if (entry) prependHistory(entry); },
+  onHistoryFull(id, dataUri) { rubyResolve('full:' + id, dataUri || null); },
 };
 
 /* ------------------------------------------------------------------ fal.ai queue runner */
@@ -327,6 +333,7 @@ async function doRender() {
     // cache a data URI copy for local saving
     state.renderData = await urlToDataUri(url).catch(() => null);
     log('render complete', 'l-ok');
+    if (state.renderData) recordHistory(state.renderData, Object.assign(historyMeta(), { scene: 'viewport' }));
     setStatus('done', 'ok');
     setBusy(false);
     refreshButtons();
@@ -414,7 +421,9 @@ async function batchRender() {
         const out = await falRun(FAL.RENDER, buildRenderInputs(cap.dataUri));
         const url = pickImage(out);
         if (!url) throw new Error('no image');
-        fillCell(cell, url, cap.name);
+        const data = await urlToDataUri(url).catch(() => null);
+        fillCell(cell, url, cap.name, data);
+        if (data) recordHistory(data, Object.assign(historyMeta(), { scene: cap.name }));
         log(`· ${cap.name} ✓`, 'l-ok');
       } catch (e) {
         failCell(cell, 'render failed');
@@ -446,7 +455,7 @@ function addCell(name) {
   el.gallery.appendChild(cell);
   return cell;
 }
-function fillCell(cell, url, name) {
+function fillCell(cell, url, name, data) {
   const thumb = cell.querySelector('.cell-thumb');
   thumb.innerHTML = `<img alt="${escapeHtml(name)}" src="${url}">`;
   const acts = cell.querySelector('.cell-acts');
@@ -456,8 +465,8 @@ function fillCell(cell, url, name) {
   // save png
   const save = iconBtn('↓', 'save png');
   save.onclick = async () => {
-    const data = await urlToDataUri(url).catch(() => null);
-    if (data) callRuby('save_data_url', `skpai_${slug(name)}.png`, data);
+    const bytes = data || await urlToDataUri(url).catch(() => null);
+    if (bytes) callRuby('save_data_url', `skpai_${slug(name)}.png`, bytes);
     else callRuby('open_url', url);
   };
   acts.append(toVideo, save);
@@ -482,6 +491,114 @@ function useAsRender(url, name) {
   el.videoBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'scene'; }
+
+/* ------------------------------------------------------------------ export history
+   Every completed render is persisted to disk by Ruby (~/.skpai) and
+   restored on open, so closing the panel never loses work. */
+function makeThumb(dataUri, max) {
+  max = max || 260;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * s);
+      c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      try { resolve(c.toDataURL('image/jpeg', 0.72)); } catch (e) { resolve(dataUri); }
+    };
+    img.onerror = () => resolve(dataUri);
+    img.src = dataUri;
+  });
+}
+
+async function recordHistory(fullDataUri, meta) {
+  if (!fullDataUri) return;
+  const thumb = await makeThumb(fullDataUri);
+  const entry = {
+    id: 'r' + Date.now().toString(36) + Math.floor(Math.random() * 1e5).toString(36),
+    ts: Date.now(),
+    prompt: (meta && meta.prompt) || '',
+    aesthetic: (meta && meta.aesthetic) || '',
+    scene: (meta && meta.scene) || '',
+    thumb,
+  };
+  // persist via Ruby; the gallery updates on onHistoryAdded
+  if (!callRuby('history_add', JSON.stringify(entry), fullDataUri)) {
+    prependHistory(entry); // preview mode (no bridge): show but don't persist
+  }
+}
+
+function historyMeta() {
+  const a = state.aesthetic;
+  const label = a === 'none' ? '' : a === 'custom' ? 'custom ref' : (PRESETS[a] ? PRESETS[a].label : '');
+  return { prompt: el.prompt.value.trim(), aesthetic: label };
+}
+
+function renderHistory(entries) {
+  state.history = entries;
+  el.history.innerHTML = '';
+  el.historyCount.textContent = String(entries.length);
+  el.historyEmpty.hidden = entries.length > 0;
+  el.history.hidden = entries.length === 0;
+  entries.forEach((e) => el.history.appendChild(historyCell(e)));
+}
+
+function prependHistory(entry) {
+  state.history.unshift(entry);
+  el.historyCount.textContent = String(state.history.length);
+  el.historyEmpty.hidden = true;
+  el.history.hidden = false;
+  el.history.insertBefore(historyCell(entry), el.history.firstChild);
+}
+
+function historyCell(e) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  const label = e.scene || (e.aesthetic ? e.aesthetic : timeLabel(e.ts));
+  cell.innerHTML =
+    `<div class="cell-thumb"><img alt="${escapeHtml(label)}" src="${e.thumb}"></div>` +
+    `<div class="cell-bar"><span class="cell-name" title="${escapeHtml(e.prompt || '')}">${escapeHtml(label)}</span>` +
+    `<span class="cell-acts"></span></div>`;
+  const acts = cell.querySelector('.cell-acts');
+  const use = iconBtn('→', 'load for video / re-use');
+  use.onclick = () => loadFromHistory(e.id, label);
+  const save = iconBtn('↓', 'export png');
+  save.onclick = () => { if (!callRuby('history_export', e.id)) log('export needs SketchUp', 'l-warn'); };
+  const del = iconBtn('×', 'delete');
+  del.onclick = () => { if (!callRuby('history_delete', e.id)) { removeHistoryCell(e.id); } };
+  acts.append(use, save, del);
+  cell.dataset.id = e.id;
+  return cell;
+}
+
+function removeHistoryCell(id) {
+  state.history = state.history.filter((h) => h.id !== id);
+  const cell = el.history.querySelector(`.cell[data-id="${id}"]`);
+  if (cell) cell.remove();
+  el.historyCount.textContent = String(state.history.length);
+  if (!state.history.length) { el.history.hidden = true; el.historyEmpty.hidden = false; }
+}
+
+async function loadFromHistory(id, label) {
+  if (!callRuby('history_get_full', id)) { log('loading history needs SketchUp', 'l-warn'); return; }
+  log(`loading “${label}”…`, 'l-time');
+  const dataUri = await rubyAwait('full:' + id);
+  if (!dataUri) { log('history item missing on disk', 'l-warn'); return; }
+  state.render = dataUri;      // fal accepts data URIs for the video image_url
+  state.renderData = dataUri;
+  el.renderImg.src = dataUri; el.renderImg.hidden = false;
+  el.renderPreview.querySelector('.preview-empty').style.display = 'none';
+  log(`“${label}” → loaded into 04 · ready for video`, 'l-acc');
+  refreshButtons();
+}
+
+function timeLabel(ts) {
+  if (!ts) return 'render';
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 /* ------------------------------------------------------------------ response pickers */
 function pickImage(o) {
@@ -634,6 +751,13 @@ function wire() {
     if (state.video) callRuby('open_url', state.video);
   });
 
+  // --- history ---
+  el.clearHistory.addEventListener('click', () => {
+    if (!state.history.length) return;
+    if (!callRuby('history_clear')) renderHistory([]);
+    log('history cleared', 'l-time');
+  });
+
   // --- console ---
   el.clearLog.addEventListener('click', () => { el.log.innerHTML = ''; });
 }
@@ -647,6 +771,7 @@ function init() {
     if (k) { state.apiKey = k; el.apiKey.value = k; }
   } catch {}
   callRuby('read_pref', 'fal_key'); // fall back to SketchUp defaults
+  callRuby('history_load');         // restore saved renders
   refreshMeter();
   refreshButtons();
   log('SkpAI ready · nano-banana-2 + seedance 2', 'l-acc');

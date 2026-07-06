@@ -230,6 +230,9 @@ body {
   width: 100%; height: 100%; object-fit: cover;
   display: block;
 }
+/* keep the [hidden] attribute working despite the display:block above,
+   so an empty <img> never shows a broken-image glyph */
+.preview img[hidden], .preview video[hidden], .dropzone img[hidden] { display: none; }
 .preview-empty {
   font-family: var(--mono); font-size: 10px; text-transform: uppercase;
   letter-spacing: 0.14em; color: var(--ink-faint);
