@@ -175,6 +175,31 @@ body {
 .btn--primary:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--accent); }
 .btn--ghost { background: transparent; }
 
+/* non-interactive header tag (e.g. "optional") */
+.tag {
+  font-family: var(--mono); font-size: 9px; text-transform: uppercase;
+  letter-spacing: 0.16em; color: var(--ink-faint);
+  border: 1px solid var(--line-soft); border-radius: 999px; padding: 2px 8px;
+}
+
+/* select (aesthetic target) */
+.select-wrap { position: relative; }
+.select {
+  width: 100%; height: 38px;
+  background: var(--recess); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 0 30px 0 10px; font-size: 12px;
+  outline: none; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.select:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+.select option, .select optgroup { background: #141416; color: var(--ink); }
+.select-caret {
+  position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+  color: var(--ink-dim); font-size: 11px; pointer-events: none;
+}
+
 /* small chips in headers */
 .chip {
   font-family: var(--mono); font-size: 9.5px; text-transform: uppercase;

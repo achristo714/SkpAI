@@ -17,7 +17,7 @@ enhancer. Dark, Teenage-Engineering "field" styled panel.
 | 00 | **connect** | Enter & save your fal.ai API key (stored locally). |
 | 01 | **capture** | Grabs the current viewport as a PNG (scaled to 1536px long edge). |
 | 02 | **prompt** | Your brief. A live *strength* meter flags weak prompts; **✧ enhance** rewrites them with a fal text model. |
-| 03 | **aesthetic ref** | Drop a material / mood image. Passed to nano-banana-2 as a second image so output materials match. |
+| 03 | **aesthetic** | *Optional.* A dropdown: **none** (keep model materials), 8 built-in **presets** (Scandinavian, Brutalist, Japandi, …) that steer materials via text, or **custom image…** to match your own reference (passed to nb2 as a second image). |
 | 04 | **render · nb2** | Sends viewport (+ reference) to `nano-banana-2` and shows the result. Auto-enhances a weak prompt first. |
 | 05 | **video · seedance 2** | Uses the render as the first frame → *dolly in* or *timelapse* clip via `seedance/v2`. |
 | 06 | **batch · scenes** | **Scan** the model's scenes, then **render all** with the current prompt & reference. Each result gets a *save* (↓) and a *→* to load it into **05** for video. |
@@ -58,12 +58,17 @@ fal.ai occasionally renames model slugs. All endpoint IDs live at the top of
 
 ```js
 const FAL = {
-  RENDER:    'fal-ai/nano-banana-2/edit',            // still render
-  VIDEO:     'fal-ai/bytedance/seedance/v2/image-to-video', // video
-  LLM:       'fal-ai/any-llm',                        // prompt enhancer
+  RENDER:    'fal-ai/nano-banana-2/edit',                    // still render
+  VIDEO:     'bytedance/seedance-2.0/fast/image-to-video',   // video (note: no fal-ai/ prefix)
+  VIDEO_PARAMS: { resolution: '1080p' },                     // trimmed if fal 422s a field
+  LLM:       'fal-ai/any-llm',                               // prompt enhancer
   LLM_MODEL: 'google/gemini-flash-1.5',
 };
 ```
+
+> Newer ByteDance models on fal are namespaced **without** the `fal-ai/` prefix.
+> For a text-only clip (ignores the render), swap `VIDEO` to
+> `bytedance/seedance-2.0/fast/text-to-video`.
 
 Camera-motion prompt presets (`dolly`, `timelapse`) are in the `MOTION` object
 just below — tweak the wording or add your own moves there.

@@ -84,19 +84,28 @@
     <section class="module" id="mod-ref">
       <div class="mod-head">
         <span class="mod-num">03</span>
-        <span class="mod-label">aesthetic ref</span>
+        <span class="mod-label">aesthetic</span>
         <span class="mod-rule"></span>
-        <button class="chip" id="clearRef" type="button" hidden>clear</button>
+        <span class="tag">optional</span>
       </div>
       <div class="mod-body">
-        <label class="dropzone" id="dropzone" for="refInput">
+        <label class="field-label" for="aestheticSel">target aesthetic</label>
+        <div class="select-wrap">
+          <select id="aestheticSel" class="select mono">
+            <option value="none">none · keep model materials</option>
+            <optgroup label="presets" id="presetGroup"></optgroup>
+            <option value="custom">custom image…</option>
+          </select>
+          <span class="select-caret">▾</span>
+        </div>
+        <label class="dropzone" id="dropzone" for="refInput" hidden>
           <span class="preview-empty" id="refEmpty">drop material / mood image</span>
           <img id="refImg" alt="reference" hidden />
           <span class="corner tl"></span><span class="corner tr"></span>
           <span class="corner bl"></span><span class="corner br"></span>
         </label>
         <input id="refInput" type="file" accept="image/*" hidden />
-        <p class="hint">nano-banana-2 matches materials & mood to this image.</p>
+        <p class="hint" id="aestheticHint">Off by default. Pick a preset, or “custom image” to match your own reference.</p>
       </div>
     </section>
 

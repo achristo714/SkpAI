@@ -16,8 +16,13 @@ const FAL = {
   QUEUE_BASE: 'https://queue.fal.run',
   // nano-banana-2 image edit (multi-image: viewport + aesthetic ref)
   RENDER:   'fal-ai/nano-banana-2/edit',
-  // Seedance 2 image-to-video
-  VIDEO:    'fal-ai/bytedance/seedance/v2/image-to-video',
+  // Seedance 2 (fast) image-to-video — animates the render as the first frame.
+  // Note the newer bytedance models are namespaced WITHOUT the fal-ai/ prefix.
+  // Text-to-video variant, if you want it: 'bytedance/seedance-2.0/fast/text-to-video'
+  VIDEO:    'bytedance/seedance-2.0/fast/image-to-video',
+  // Extra params merged into every video request. Trim these if fal rejects a
+  // field for the fast tier (strict schemas 422 on unknown/invalid values).
+  VIDEO_PARAMS: { resolution: '1080p' },
   // text model used to enhance weak prompts
   LLM:      'fal-ai/any-llm',
   LLM_MODEL: 'google/gemini-flash-1.5',
@@ -41,11 +46,25 @@ const MOTION = {
   },
 };
 
+/* Built-in aesthetic targets. Selecting one appends its descriptor to the
+   render prompt (no image needed). "custom" reveals the image dropzone. */
+const PRESETS = {
+  scandi:      { label: 'Scandinavian minimal', desc: 'Scandinavian minimalism: pale oak, white oiled wood, soft matte plaster, muted neutral palette, diffuse northern daylight, calm and airy.' },
+  brutalist:   { label: 'Brutalist concrete',   desc: 'Brutalist: raw board-formed concrete, exposed aggregate, matte grey monolithic surfaces, hard directional light, stark and sculptural.' },
+  walnut:      { label: 'Warm walnut & brass',  desc: 'Warm mid-century materials: rich walnut veneer, brushed brass, cognac leather, warm tungsten glow, cozy and refined.' },
+  japandi:     { label: 'Japandi',              desc: 'Japandi: light ash and charred wood, tatami and linen textures, wabi-sabi ceramics, restrained earthy palette, soft veiled light.' },
+  industrial:  { label: 'Industrial loft',      desc: 'Industrial loft: blackened steel, weathered brick, polished concrete floor, aged patina, moody overcast daylight through tall windows.' },
+  travertine:  { label: 'Coastal travertine',   desc: 'Warm Mediterranean: cream travertine, lime plaster, bleached oak, linen, sun-washed palette, bright golden coastal light.' },
+  hitech:      { label: 'High-tech glass/steel',desc: 'High-tech: crisp glass curtain wall, brushed stainless steel, anodized aluminium, cool crisp lighting, precise and reflective.' },
+  noir:        { label: 'Moody noir',           desc: 'Moody noir interior: dark stained timber, charcoal stone, deep shadow, single warm accent light, dramatic low-key cinematic mood.' },
+};
+
 /* ------------------------------------------------------------------ state */
 const state = {
   apiKey: '',
   viewport: null,   // data URI of captured viewport
-  reference: null,  // data URI of aesthetic reference
+  aesthetic: 'none',// select value: 'none' | <preset key> | 'custom'
+  reference: null,  // data URI of custom aesthetic reference image
   render: null,     // hosted URL of nb2 result
   renderData: null, // data URI of render (for local save)
   video: null,      // hosted URL of seedance result
@@ -62,8 +81,8 @@ const el = {
   captureBtn: $('captureBtn'), sourcePreview: $('sourcePreview'), sourceImg: $('sourceImg'),
   prompt: $('prompt'), enhanceBtn: $('enhanceBtn'),
   promptMeter: $('promptMeter'), promptWords: $('promptWords'),
-  dropzone: $('dropzone'), refInput: $('refInput'), refImg: $('refImg'),
-  refEmpty: $('refEmpty'), clearRef: $('clearRef'),
+  aestheticSel: $('aestheticSel'), presetGroup: $('presetGroup'), aestheticHint: $('aestheticHint'),
+  dropzone: $('dropzone'), refInput: $('refInput'), refImg: $('refImg'), refEmpty: $('refEmpty'),
   renderBtn: $('renderBtn'), renderPreview: $('renderPreview'), renderImg: $('renderImg'),
   saveRender: $('saveRender'),
   motionSeg: $('motionSeg'),
@@ -255,6 +274,32 @@ async function enhancePrompt() {
 }
 
 /* ------------------------------------------------------------------ render (nb2) */
+// Assemble the nb2 request for a given source image (viewport or scene),
+// folding in whichever aesthetic target is selected. Used by single + batch.
+function buildRenderInputs(source) {
+  const base = el.prompt.value.trim();
+  const images = [source];
+  const keepGeo = ' Keep the exact geometry and composition of the input image.';
+  let prompt;
+
+  if (state.aesthetic === 'custom' && state.reference) {
+    images.push(state.reference);
+    prompt = base + ' Match the materials, palette and mood of the reference ' +
+             'image while keeping the exact geometry and composition of the first image.';
+  } else if (state.aesthetic !== 'none' && state.aesthetic !== 'custom' && PRESETS[state.aesthetic]) {
+    prompt = base + ' Target aesthetic — ' + PRESETS[state.aesthetic].desc + keepGeo;
+  } else {
+    prompt = base + keepGeo;
+  }
+  return { prompt, image_urls: images, num_images: 1 };
+}
+
+function aestheticNote() {
+  if (state.aesthetic === 'custom' && state.reference) return '· matching custom reference image';
+  if (PRESETS[state.aesthetic]) return '· target aesthetic: ' + PRESETS[state.aesthetic].label;
+  return null;
+}
+
 async function doRender() {
   if (!state.viewport) { log('capture the viewport first (01)', 'l-warn'); return; }
   if (!el.prompt.value.trim()) { log('enter a prompt (02)', 'l-warn'); return; }
@@ -268,21 +313,10 @@ async function doRender() {
 
   setBusy(true, 'rendering');
   log('render → nano-banana-2', 'l-acc');
+  const note = aestheticNote();
+  if (note) log(note, 'l-time');
   try {
-    const images = [state.viewport];
-    if (state.reference) {
-      images.push(state.reference);
-      log('· using aesthetic reference for material match', 'l-time');
-    }
-    const promptText = el.prompt.value.trim() + (state.reference
-      ? ' Match the materials, palette and mood of the reference image while keeping the exact geometry and composition of the first image.'
-      : ' Keep the exact geometry and composition of the input image.');
-
-    const out = await falRun(FAL.RENDER, {
-      prompt: promptText,
-      image_urls: images,
-      num_images: 1,
-    });
+    const out = await falRun(FAL.RENDER, buildRenderInputs(state.viewport));
 
     const url = pickImage(out);
     if (!url) throw new Error('no image in response');
@@ -311,12 +345,11 @@ async function doVideo() {
   log(`video → seedance 2 · ${m.label}`, 'l-acc');
   try {
     const base = el.prompt.value.trim();
-    const out = await falRun(FAL.VIDEO, {
+    const out = await falRun(FAL.VIDEO, Object.assign({
       prompt: `${base}. ${m.prompt}`,
       image_url: state.render,
       duration: m.duration,
-      resolution: '1080p',
-    });
+    }, FAL.VIDEO_PARAMS || {}));
     const url = pickVideo(out);
     if (!url) throw new Error('no video in response');
     state.video = url;
@@ -360,10 +393,8 @@ async function batchRender() {
   el.gallery.hidden = false;
   el.gallery.innerHTML = '';
   const total = state.scenes.length;
-  const refNote = state.reference
-    ? ' Match the materials, palette and mood of the reference image while keeping the exact geometry and composition of the first image.'
-    : ' Keep the exact geometry and composition of the input image.';
-  const basePrompt = el.prompt.value.trim() + refNote;
+  const note = aestheticNote();
+  if (note) log(note, 'l-time');
 
   try {
     await new Promise((res) => { callRuby('batch_begin'); rubyAwait('batch').then(res); });
@@ -380,8 +411,7 @@ async function batchRender() {
 
       // render it
       try {
-        const images = state.reference ? [cap.dataUri, state.reference] : [cap.dataUri];
-        const out = await falRun(FAL.RENDER, { prompt: basePrompt, image_urls: images, num_images: 1 });
+        const out = await falRun(FAL.RENDER, buildRenderInputs(cap.dataUri));
         const url = pickImage(out);
         if (!url) throw new Error('no image');
         fillCell(cell, url, cap.name);
@@ -490,16 +520,45 @@ function refreshButtons() {
   el.batchBtn.disabled = !state.scenes.length;
 }
 
-/* ------------------------------------------------------------------ reference image */
+/* ------------------------------------------------------------------ aesthetic target */
+// Fill the preset <optgroup> from PRESETS so the list stays in one place.
+function populatePresets() {
+  const frag = document.createDocumentFragment();
+  Object.keys(PRESETS).forEach((key) => {
+    const o = document.createElement('option');
+    o.value = key; o.textContent = PRESETS[key].label;
+    frag.appendChild(o);
+  });
+  el.presetGroup.appendChild(frag);
+}
+
+function onAestheticChange() {
+  const v = el.aestheticSel.value;
+  state.aesthetic = v;
+  const custom = v === 'custom';
+  el.dropzone.hidden = !custom;
+  if (!custom) state.reference = null; // presets/none don't use an image
+
+  if (v === 'none') el.aestheticHint.textContent = 'Off — the render keeps your model’s own materials.';
+  else if (custom) el.aestheticHint.textContent = 'Drop a material / mood image; nb2 matches materials to it.';
+  else el.aestheticHint.textContent = PRESETS[v].desc;
+
+  log(v === 'none' ? 'aesthetic → off'
+      : custom ? 'aesthetic → custom image'
+      : 'aesthetic → ' + PRESETS[v].label, 'l-time');
+}
+
 function loadReference(file) {
   if (!file || !file.type.startsWith('image/')) return;
   const fr = new FileReader();
   fr.onload = () => {
     state.reference = fr.result;
+    state.aesthetic = 'custom';
+    el.aestheticSel.value = 'custom';
+    el.dropzone.hidden = false;
     el.refImg.src = fr.result;
     el.refImg.hidden = false;
     el.refEmpty.style.display = 'none';
-    el.clearRef.hidden = false;
     log('aesthetic reference loaded', 'l-ok');
   };
   fr.readAsDataURL(file);
@@ -535,7 +594,8 @@ function wire() {
   el.prompt.addEventListener('input', refreshMeter);
   el.enhanceBtn.addEventListener('click', enhancePrompt);
 
-  // --- reference drag/drop + file ---
+  // --- aesthetic target (dropdown + optional custom image) ---
+  el.aestheticSel.addEventListener('change', onAestheticChange);
   el.refInput.addEventListener('change', (e) => loadReference(e.target.files[0]));
   ['dragenter', 'dragover'].forEach((ev) =>
     el.dropzone.addEventListener(ev, (e) => { e.preventDefault(); el.dropzone.classList.add('dragover'); }));
@@ -544,13 +604,6 @@ function wire() {
   el.dropzone.addEventListener('drop', (e) => {
     const f = e.dataTransfer && e.dataTransfer.files[0];
     if (f) loadReference(f);
-  });
-  el.clearRef.addEventListener('click', (e) => {
-    e.preventDefault();
-    state.reference = null;
-    el.refImg.hidden = true; el.refInput.value = '';
-    el.refEmpty.style.display = ''; el.clearRef.hidden = true;
-    log('reference cleared', 'l-time');
   });
 
   // --- render / video ---
@@ -587,6 +640,7 @@ function wire() {
 
 /* ------------------------------------------------------------------ init */
 function init() {
+  populatePresets();
   wire();
   try {
     const k = localStorage.getItem('skpai_fal_key');
