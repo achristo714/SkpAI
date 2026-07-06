@@ -1,0 +1,5 @@
+# build artifact — regenerate with: zip -r SkpAI.rbz SkpAI.rb SkpAI
+*.rbz
+
+# os / editor cruft
+.DS_Store
