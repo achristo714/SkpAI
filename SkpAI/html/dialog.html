@@ -148,6 +148,30 @@
             <span class="seg-dot"></span> timelapse
           </button>
         </div>
+
+        <div class="settings">
+          <div class="setting">
+            <span class="setting-label">res</span>
+            <div class="segmented segmented--sm" id="resSeg">
+              <button class="seg" data-res="480p" type="button">480p</button>
+              <button class="seg seg--on" data-res="720p" type="button">720p</button>
+            </div>
+          </div>
+          <div class="setting">
+            <span class="setting-label">length</span>
+            <div class="segmented segmented--sm" id="durSeg">
+              <button class="seg seg--on" data-dur="5" type="button">5s</button>
+              <button class="seg" data-dur="10" type="button">10s</button>
+            </div>
+          </div>
+          <div class="setting setting--row">
+            <span class="setting-label">audio</span>
+            <button class="toggle is-on" id="audioToggle" type="button" role="switch" aria-checked="true">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+        </div>
+
         <div class="preview preview--video" id="videoPreview">
           <span class="preview-empty">no video yet</span>
           <video id="videoEl" playsinline loop muted hidden></video>

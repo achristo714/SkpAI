@@ -291,6 +291,37 @@ body {
 .seg--on { color: var(--ink); background: var(--panel-2); }
 .seg--on .seg-dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
 
+/* ---------------- video settings ---------------- */
+.settings {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px 10px;
+  align-items: center;
+}
+.setting { display: flex; flex-direction: column; gap: 5px; }
+.setting--row { flex-direction: row; align-items: center; gap: 8px; }
+.setting-label {
+  font-family: var(--mono); font-size: 9px; text-transform: uppercase;
+  letter-spacing: 0.14em; color: var(--ink-faint);
+}
+.segmented--sm { padding: 3px; gap: 4px; }
+.segmented--sm .seg { padding: 5px 6px; font-size: 10px; }
+
+/* toggle switch */
+.toggle {
+  position: relative; width: 40px; height: 22px; flex-shrink: 0;
+  background: var(--recess); border: 1px solid var(--line);
+  border-radius: 999px; cursor: pointer; padding: 0;
+  transition: background .15s, border-color .15s;
+}
+.toggle-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--ink-dim); transition: transform .16s, background .16s;
+}
+.toggle.is-on { background: var(--accent-dim); border-color: var(--accent); }
+.toggle.is-on .toggle-knob { transform: translateX(18px); background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
 /* ---------------- batch / gallery ---------------- */
 .batch-status {
   display: flex; align-items: center; justify-content: space-between;

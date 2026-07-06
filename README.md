@@ -19,7 +19,7 @@ enhancer. Dark, Teenage-Engineering "field" styled panel.
 | 02 | **prompt** | Your brief. A live *strength* meter flags weak prompts; **✧ enhance** rewrites them with a fal text model. |
 | 03 | **aesthetic** | *Optional.* A dropdown: **none** (keep model materials), 8 built-in **presets** (Scandinavian, Brutalist, Japandi, …) that steer materials via text, or **custom image…** to match your own reference (passed to nb2 as a second image). |
 | 04 | **render · nb2** | Sends viewport (+ reference) to `nano-banana-2` and shows the result. Auto-enhances a weak prompt first. |
-| 05 | **video · seedance 2** | Uses the render as the first frame → *dolly in* or *timelapse* clip via `seedance/v2`. |
+| 05 | **video · seedance 2** | Uses the render as the first frame → *dolly in* or *timelapse* clip. Controls: **resolution** (480p / 720p), **length** (5s / 10s), **audio** on/off. |
 | 06 | **batch · scenes** | **Scan** the model's scenes, then **render all** with the current prompt & reference. Each result gets a *save* (↓) and a *→* to load it into **05** for video. |
 | 07 | **history** | Every render is saved to disk and restored when you reopen SkpAI, so closing the panel never loses work. Each entry has *→* (load back into **04** for re-use / video), *↓* (export PNG), and *×* (delete). |
 
@@ -61,11 +61,18 @@ fal.ai occasionally renames model slugs. All endpoint IDs live at the top of
 const FAL = {
   RENDER:    'fal-ai/nano-banana-2/edit',                    // still render
   VIDEO:     'bytedance/seedance-2.0/fast/image-to-video',   // video (note: no fal-ai/ prefix)
-  VIDEO_PARAMS: { resolution: '1080p' },                     // trimmed if fal 422s a field
+  AUDIO_FIELD: 'generate_audio',                             // field this model uses for audio
+  VIDEO_PARAMS: {},                                          // extra static video params
   LLM:       'fal-ai/any-llm',                               // prompt enhancer
   LLM_MODEL: 'google/gemini-flash-1.5',
 };
 ```
+
+> The fast tier only accepts **480p / 720p** (not 1080p). Resolution, length and
+> audio are set live in module 05. The video call is self-healing: if fal 422s
+> an optional field it doesn't recognize (e.g. a different audio flag name), it
+> strips just that field and retries, logging what it dropped — so a wrong
+> `AUDIO_FIELD` degrades to "no audio" instead of failing the whole clip.
 
 > Newer ByteDance models on fal are namespaced **without** the `fal-ai/` prefix.
 > For a text-only clip (ignores the render), swap `VIDEO` to

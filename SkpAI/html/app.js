@@ -20,9 +20,11 @@ const FAL = {
   // Note the newer bytedance models are namespaced WITHOUT the fal-ai/ prefix.
   // Text-to-video variant, if you want it: 'bytedance/seedance-2.0/fast/text-to-video'
   VIDEO:    'bytedance/seedance-2.0/fast/image-to-video',
-  // Extra params merged into every video request. Trim these if fal rejects a
-  // field for the fast tier (strict schemas 422 on unknown/invalid values).
-  VIDEO_PARAMS: { resolution: '1080p' },
+  // Field name this model uses to toggle native audio. If fal 422s it as an
+  // unknown field, the video call auto-strips it and retries (see doVideo).
+  AUDIO_FIELD: 'generate_audio',
+  // Any extra static params merged into every video request.
+  VIDEO_PARAMS: {},
   // text model used to enhance weak prompts
   LLM:      'fal-ai/any-llm',
   LLM_MODEL: 'google/gemini-flash-1.5',
@@ -35,14 +37,12 @@ const MOTION = {
     prompt: 'Slow cinematic dolly-in: the camera smoothly pushes forward ' +
             'toward the subject, subtle parallax, steady architectural ' +
             'walkthrough feel, gentle depth reveal. Photorealistic, stable, no warping.',
-    duration: '5',
   },
   timelapse: {
     label: 'timelapse',
     prompt: 'Timelapse from day to dusk: sunlight shifts across the surfaces, ' +
             'soft clouds drift, ambient light warms then cools, long shadows ' +
             'sweep. Camera mostly static, hyperlapse energy. Photorealistic, no warping.',
-    duration: '5',
   },
 };
 
@@ -69,6 +69,9 @@ const state = {
   renderData: null, // data URI of render (for local save)
   video: null,      // hosted URL of seedance result
   motion: 'dolly',
+  res: '720p',      // video resolution (fast tier: 480p | 720p)
+  dur: '5',         // video duration in seconds
+  audio: true,      // native audio on/off
   scenes: [],       // [{index, name}] from the model
   history: [],      // persisted render history (mirrors ~/.skpai/index.json)
   busy: false,
@@ -89,6 +92,7 @@ const el = {
   motionSeg: $('motionSeg'),
   videoBtn: $('videoBtn'), videoPreview: $('videoPreview'), videoEl: $('videoEl'),
   saveVideo: $('saveVideo'),
+  resSeg: $('resSeg'), durSeg: $('durSeg'), audioToggle: $('audioToggle'),
   scanBtn: $('scanBtn'), sceneCount: $('sceneCount'), batchProgress: $('batchProgress'),
   batchBtn: $('batchBtn'), gallery: $('gallery'),
   history: $('history'), historyCount: $('historyCount'), historyEmpty: $('historyEmpty'),
@@ -194,7 +198,13 @@ async function falRun(endpoint, input, { onProgress } = {}) {
   const submit = await fetch(`${FAL.QUEUE_BASE}/${endpoint}`, {
     method: 'POST', headers, body: JSON.stringify(input),
   });
-  if (!submit.ok) throw new Error(`submit ${submit.status}: ${await safeText(submit)}`);
+  if (!submit.ok) {
+    const raw = await submit.text().catch(() => '');
+    const err = new Error(`submit ${submit.status}: ${raw.slice(0, 300)}`);
+    err.status = submit.status;
+    try { err.body = JSON.parse(raw); } catch (e) { /* non-JSON */ }
+    throw err;
+  }
   const job = await submit.json();
   const statusUrl = job.status_url;
   const responseUrl = job.response_url;
@@ -228,6 +238,28 @@ async function falRun(endpoint, input, { onProgress } = {}) {
 }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 async function safeText(r) { try { return (await r.text()).slice(0, 300); } catch { return ''; } }
+
+// Like falRun, but if fal 422s because an OPTIONAL field is unknown/forbidden
+// for this model, it strips that field and retries once. `keep` lists fields
+// that must never be stripped (they're required). Value errors (e.g. a bad
+// enum) are NOT stripped — they surface so the user can fix the setting.
+async function falRunResilient(endpoint, input, keep) {
+  try {
+    return await falRun(endpoint, input);
+  } catch (e) {
+    const detail = e && e.status === 422 && e.body && e.body.detail;
+    if (!Array.isArray(detail)) throw e;
+    const unknown = detail
+      .filter((d) => /forbidden|unexpected|extra/i.test((d.type || '') + ' ' + (d.msg || '')))
+      .map((d) => Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : null)
+      .filter((f) => f && !keep.includes(f) && f in input);
+    if (!unknown.length) throw e;
+    const trimmed = Object.assign({}, input);
+    unknown.forEach((f) => delete trimmed[f]);
+    log('this model rejected: ' + unknown.join(', ') + ' — retrying without', 'l-warn');
+    return await falRun(endpoint, trimmed);
+  }
+}
 
 /* ------------------------------------------------------------------ prompt strength */
 function scorePrompt(text) {
@@ -349,14 +381,18 @@ async function doVideo() {
   if (!state.render) { log('render a still first (04)', 'l-warn'); return; }
   const m = MOTION[state.motion];
   setBusy(true, 'animating');
-  log(`video → seedance 2 · ${m.label}`, 'l-acc');
+  log(`video → seedance 2 · ${m.label} · ${state.res} · ${state.dur}s · audio ${state.audio ? 'on' : 'off'}`, 'l-acc');
   try {
     const base = el.prompt.value.trim();
-    const out = await falRun(FAL.VIDEO, Object.assign({
+    const input = Object.assign({
       prompt: `${base}. ${m.prompt}`,
       image_url: state.render,
-      duration: m.duration,
-    }, FAL.VIDEO_PARAMS || {}));
+      duration: state.dur,
+      resolution: state.res,
+      [FAL.AUDIO_FIELD]: state.audio,
+    }, FAL.VIDEO_PARAMS || {});
+
+    const out = await falRunResilient(FAL.VIDEO, input, ['prompt', 'image_url']);
     const url = pickVideo(out);
     if (!url) throw new Error('no video in response');
     state.video = url;
@@ -600,6 +636,19 @@ function timeLabel(ts) {
   return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// Wire a .segmented control: clicking a button with data-<attr> highlights it
+// and calls cb(value). Used by the video resolution / duration pickers.
+function segmentPick(container, attr, cb) {
+  if (!container) return;
+  container.querySelectorAll('.seg').forEach((seg) => {
+    seg.addEventListener('click', () => {
+      container.querySelectorAll('.seg').forEach((s) => s.classList.remove('seg--on'));
+      seg.classList.add('seg--on');
+      cb(seg.dataset[attr]);
+    });
+  });
+}
+
 /* ------------------------------------------------------------------ response pickers */
 function pickImage(o) {
   if (!o) return null;
@@ -739,6 +788,16 @@ function wire() {
       state.motion = seg.dataset.motion;
       log('motion → ' + MOTION[state.motion].label, 'l-time');
     });
+  });
+
+  // --- video settings: resolution / duration / audio ---
+  segmentPick(el.resSeg, 'res', (v) => { state.res = v; log('res → ' + v, 'l-time'); });
+  segmentPick(el.durSeg, 'dur', (v) => { state.dur = v; log('length → ' + v + 's', 'l-time'); });
+  el.audioToggle.addEventListener('click', () => {
+    state.audio = !state.audio;
+    el.audioToggle.classList.toggle('is-on', state.audio);
+    el.audioToggle.setAttribute('aria-checked', String(state.audio));
+    log('audio → ' + (state.audio ? 'on' : 'off'), 'l-time');
   });
 
   // --- saves ---
